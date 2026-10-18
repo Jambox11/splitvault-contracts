@@ -143,3 +143,6 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full contribution guide.
 
 <!-- handsoff-issue-102 -->
 - #102: `rollover_invoice` Fails to Delete Payment Shards on Source Invoice Causing Ghost State
+
+<!-- handsoff-issue-103 -->
+- #103: `get_escrow_balance` Returns Non-Zero Balance on Released and Refunded Invoices
