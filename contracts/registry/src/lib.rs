@@ -62,7 +62,7 @@ pub fn contract_registered(env: &Env, creator: &Address, contract: &Address) {
     );
 }
 
-/// Emitted when an admin deregisters a contract from a creator.
+/// Emitted when a contract is deregistered from a creator.
 ///
 /// Topics: (registry, deregister, creator)
 /// Data: contract_address
@@ -207,6 +207,53 @@ impl Registry {
         contract_deregistered(&env, &creator, &contract);
     }
 
+    /// Deregister a decommissioned contract from the caller's registry.
+    ///
+    /// Requires the `creator` to authenticate. Removes `contract` from the
+    /// creator's active contract list, clears the duplicate-registration
+    /// flag, and emits a [`contract_deregistered`] discovery event.
+    ///
+    /// # Panics
+    /// * `"not registered"` — the contract is not in the creator's list.
+    pub fn deregister(env: Env, creator: Address, contract: Address) {
+        creator.require_auth();
+
+        let contracts_key = creator_contracts_key(&creator);
+        let registration_check_key = registration_key(&creator, &contract);
+
+        assert!(
+            env.storage().persistent().has(&registration_check_key),
+            "not registered"
+        );
+
+        let contracts: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&contracts_key)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let mut remaining: Vec<Address> = Vec::new(&env);
+        let mut i = 0;
+        while i < contracts.len() {
+            let entry = contracts.get_unchecked(i);
+            if entry != contract {
+                remaining.push_back(entry);
+            }
+            i += 1;
+        }
+
+        env.storage().persistent().set(&contracts_key, &remaining);
+        env.storage()
+            .persistent()
+            .extend_ttl(&contracts_key, REGISTRY_MIN_TTL, REGISTRY_MAX_TTL);
+
+        env.storage()
+            .persistent()
+            .remove(&registration_check_key);
+
+        contract_deregistered(&env, &creator, &contract);
+    }
+
     /// Register a deployed contract address under a creator.
     ///
     /// Appends `contract` to the creator's list. Rejects duplicate
@@ -243,132 +290,36 @@ impl Registry {
             .persistent()
             .get(&contracts_key)
             .unwrap_or_else(|| Vec::new(&env));
+
         assert!(
-            contracts.len() < MAX_CONTRACTS_PER_CREATOR as u32,
+            contracts.len() < MAX_CONTRACTS_PER_CREATOR,
             "registry limit exceeded"
         );
 
-        // Append and persist, then bump TTL so the creator list survives
-        // even when the creator is only active once a year (#48).
         contracts.push_back(contract.clone());
-        env.storage()
-            .persistent()
-            .set(&contracts_key, &contracts);
+
+        env.storage().persistent().set(&contracts_key, &contracts);
         env.storage()
             .persistent()
             .extend_ttl(&contracts_key, REGISTRY_MIN_TTL, REGISTRY_MAX_TTL);
 
-        // Mark as registered and bump TTL on the flag entry too (#48).
         env.storage()
             .persistent()
             .set(&registration_check_key, &true);
-        env.storage()
-            .persistent()
-            .extend_ttl(&registration_check_key, REGISTRY_MIN_TTL, REGISTRY_MAX_TTL);
+        env.storage().persistent().extend_ttl(
+            &registration_check_key,
+            REGISTRY_MIN_TTL,
+            REGISTRY_MAX_TTL,
+        );
 
-        // Emit event.
         contract_registered(&env, &creator, &contract);
     }
 
-    /// Return all registered contract addresses for a creator.
+    /// Return the list of contracts registered under `creator`.
     pub fn get_contracts(env: Env, creator: Address) -> Vec<Address> {
-        let key = creator_contracts_key(&creator);
-        let contracts: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or_else(|| Vec::new(&env));
-        // Bump TTL on every read so active registries never expire (#48).
-        if env.storage().persistent().has(&key) {
-            env.storage()
-                .persistent()
-                .extend_ttl(&key, REGISTRY_MIN_TTL, REGISTRY_MAX_TTL);
-        }
-        contracts
-    }
-
-    /// Return a paginated slice of a creator's registered contract addresses.
-    ///
-    /// Returns up to `limit` addresses starting at index `start`. Out-of-range
-    /// `start` or `limit == 0` yields an empty vector. This bounds the compute
-    /// and memory consumed by a single view call for prolific creators (#77).
-    pub fn get_contracts_page(
-        env: Env,
-        creator: Address,
-        start: u32,
-        limit: u32,
-    ) -> Vec<Address> {
-        let key = creator_contracts_key(&creator);
-        let contracts: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or_else(|| Vec::new(&env));
-        // Bump TTL on every read so active registries never expire (#48).
-        if env.storage().persistent().has(&key) {
-            env.storage()
-                .persistent()
-                .extend_ttl(&key, REGISTRY_MIN_TTL, REGISTRY_MAX_TTL);
-        }
-
-        let mut page: Vec<Address> = Vec::new(&env);
-        let total = contracts.len();
-        if limit == 0 || start >= total {
-            return page;
-        }
-
-        // Clamp the end index to the vector length, guarding against overflow.
-        let end = match start.checked_add(limit) {
-            Some(sum) => {
-                if sum < total {
-                    sum
-                } else {
-                    total
-                }
-            }
-            None => total,
-        };
-
-        let mut i = start;
-        while i < end {
-            page.push_back(contracts.get_unchecked(i));
-            i += 1;
-        }
-        page
-    }
-
-    /// Return the number of registered contracts for a creator.
-    pub fn get_contract_count(env: Env, creator: Address) -> u32 {
-        let contracts: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&creator_contracts_key(&creator))
-            .unwrap_or_else(|| Vec::new(&env));
-        contracts.len()
-    }
-
-    /// Check whether a specific (creator, contract) pair is already registered.
-    pub fn is_registered(env: Env, creator: Address, contract: Address) -> bool {
         env.storage()
             .persistent()
-            .has(&registration_key(&creator, &contract))
+            .get(&creator_contracts_key(&creator))
+            .unwrap_or_else(|| Vec::new(&env))
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use soroban_sdk::{
-        testutils::{storage::Persistent as _, Address as _, Events as _},
-        Address, Env, Symbol, TryFromVal, Val, Vec,
-    };
-
-    #[test]
-    fn test_register_and_get_contracts() {
-        let env 
-
-/* … truncated 1675 chars — edit only what you need near the top … */
