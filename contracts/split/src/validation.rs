@@ -25,6 +25,27 @@ pub fn assert_unique_recipients(env: &Env, recipients: &Vec<Address>) -> Result<
     Ok(())
 }
 
+/// Issue #104: Reject appending a recipient that already exists in the list.
+///
+/// Used by `add_recipient` so that a creator cannot append an address that is
+/// already present, which would corrupt proportional split accounting by
+/// allocating multiple tranches to the same address.
+///
+/// # Errors
+/// Returns [ContractError::DuplicateRecipient] when `candidate` is already in
+/// `recipients`.
+pub fn assert_recipient_not_present(
+    recipients: &Vec<Address>,
+    candidate: &Address,
+) -> Result<(), ContractError> {
+    for r in recipients.iter() {
+        if &r == candidate {
+            return Err(ContractError::DuplicateRecipient);
+        }
+    }
+    Ok(())
+}
+
 /// Issue #558: Verify that every recipient has a trustline for the payment
 /// token by calling `balance()` on the token contract.
 ///
@@ -186,6 +207,34 @@ mod tests {
             v.push_back(Address::generate(&env));
         }
         assert!(assert_unique_recipients(&env, &v).is_ok());
+    }
+
+    // --- assert_recipient_not_present (issue #104) ---
+
+    #[test]
+    fn add_recipient_rejects_existing_address() {
+        let env = Env::default();
+        let a = Address::generate(&env);
+        let b = Address::generate(&env);
+        let mut v: Vec<Address> = Vec::new(&env);
+        v.push_back(a.clone());
+        v.push_back(b.clone());
+        assert_eq!(
+            assert_recipient_not_present(&v, &a),
+            Err(ContractError::DuplicateRecipient)
+        );
+    }
+
+    #[test]
+    fn add_recipient_accepts_new_address() {
+        let env = Env::default();
+        let a = Address::generate(&env);
+        let b = Address::generate(&env);
+        let c = Address::generate(&env);
+        let mut v: Vec<Address> = Vec::new(&env);
+        v.push_back(a.clone());
+        v.push_back(b.clone());
+        assert!(assert_recipient_not_present(&v, &c).is_ok());
     }
 
     // --- assert_bps_sum (issue #623) ---
