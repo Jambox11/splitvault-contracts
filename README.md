@@ -140,3 +140,6 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full contribution guide.
 
 <!-- handsoff-issue-101 -->
 - #101: `transfer_invoice` Lacks `creator_cosigner` Authentication and Emits No Event
+
+<!-- handsoff-issue-102 -->
+- #102: `rollover_invoice` Fails to Delete Payment Shards on Source Invoice Causing Ghost State
