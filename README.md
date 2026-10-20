@@ -138,11 +138,14 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full contribution guide.
 
 ## Handsoff notes
 
-<!-- handsoff-issue-101 -->
-- #101: `transfer_invoice` Lacks `creator_cosigner` Authentication and Emits No Event
+<!-- handsoff-issue-5 -->
+- #5: Missing Authorization for Dynamic Payout Address Modification in `rotate_recipient_address`
 
-<!-- handsoff-issue-102 -->
-- #102: `rollover_invoice` Fails to Delete Payment Shards on Source Invoice Causing Ghost State
+<!-- handsoff-issue-6 -->
+- #6: Pool Pay Cross-Invoice Limit Bypass for Blocked and Velocity-Capped Payers
 
-<!-- handsoff-issue-103 -->
-- #103: `get_escrow_balance` Returns Non-Zero Balance on Released and Refunded Invoices
+<!-- handsoff-issue-63 -->
+- #63: Incomplete State Clean-up During Emergency Circuit Breaker Rollbacks
+
+<!-- handsoff-issue-64 -->
+- #64: Silent Payout Loss in `reveal_confidential_payment` Due to Omission of Shard Storage
