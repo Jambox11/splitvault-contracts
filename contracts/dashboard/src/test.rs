@@ -209,3 +209,95 @@ fn test_record_refunded_emits_event() {
         "record_refunded did not emit (dash, refunded) event",
     );
 }
+
+// ---------------------------------------------------------------------------
+// #107 — Dashboard event payload tests
+// ---------------------------------------------------------------------------
+
+/// Collect the data payload of the first `(dash, action)` event as a tuple of
+/// `(creator, count, volume)` where applicable.
+fn find_dash_event_data(
+    env: &Env,
+    action: soroban_sdk::Symbol,
+) -> Option<(Address, i128, i128)> {
+    let events = env.events().all();
+    for event in events.events().iter() {
+        let soroban_sdk::xdr::ContractEventBody::V0(body) = &event.body;
+        let mut topics = soroban_sdk::Vec::new(env);
+        let topics_ref: &[soroban_sdk::xdr::ScVal] = body.topics.as_ref();
+        for v in topics_ref.iter() {
+            if let Ok(val) = <Val as TryFromVal<Env, soroban_sdk::xdr::ScVal>>::try_from_val(env, v) {
+                topics.push_back(val);
+            }
+        }
+        if topics.len() >= 2 {
+            let t0 = <soroban_sdk::Symbol as TryFromVal<Env, Val>>::try_from_val(env, &topics.get_unchecked(0));
+            let t1 = <soroban_sdk::Symbol as TryFromVal<Env, Val>>::try_from_val(env, &topics.get_unchecked(1));
+            if let (Ok(topic0), Ok(topic1)) = (t0, t1) {
+                if topic0 == symbol_short!("dash") && topic1 == action {
+                    let data_val = <Val as TryFromVal<Env, soroban_sdk::xdr::ScVal>>::try_from_val(
+                        env,
+                        &body.data,
+                    )
+                    .ok()?;
+                    let tuple = <(Address, i128, i128) as TryFromVal<Env, Val>>::try_from_val(
+                        env, &data_val,
+                    )
+                    .ok()?;
+                    return Some(tuple);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// `record_created` event data must carry creator, invoice_count, total_volume (#107).
+#[test]
+fn test_record_created_event_payload() {
+    let (env, _split_id, dashboard_id) = setup();
+    let client = DashboardContractClient::new(&env, &dashboard_id);
+    let creator = Address::generate(&env);
+
+    client.record_created(&creator, &1000_i128);
+    client.record_created(&creator, &2000_i128);
+
+    let (ev_creator, count, volume) =
+        find_dash_event_data(&env, symbol_short!("created")).expect("missing created event");
+    assert_eq!(ev_creator, creator);
+    assert_eq!(count, 2);
+    assert_eq!(volume, 3000);
+}
+
+/// `record_released` event data must carry creator, released_count, released_volume (#107).
+#[test]
+fn test_record_released_event_payload() {
+    let (env, _split_id, dashboard_id) = setup();
+    let client = DashboardContractClient::new(&env, &dashboard_id);
+    let creator = Address::generate(&env);
+
+    client.record_released(&creator, &3000_i128);
+    client.record_released(&creator, &2000_i128);
+
+    let (ev_creator, count, volume) =
+        find_dash_event_data(&env, symbol_short!("released")).expect("missing released event");
+    assert_eq!(ev_creator, creator);
+    assert_eq!(count, 2);
+    assert_eq!(volume, 5000);
+}
+
+/// `record_refunded` event data must carry creator and refunded_count (#107).
+#[test]
+fn test_record_refunded_event_payload() {
+    let (env, _split_id, dashboard_id) = setup();
+    let client = DashboardContractClient::new(&env, &dashboard_id);
+    let creator = Address::generate(&env);
+
+    client.record_refunded(&creator);
+    client.record_refunded(&creator);
+
+    let (ev_creator, count, _volume) =
+        find_dash_event_data(&env, symbol_short!("refunded")).expect("missing refunded event");
+    assert_eq!(ev_creator, creator);
+    assert_eq!(count, 2);
+}
